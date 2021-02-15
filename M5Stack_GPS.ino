@@ -1,6 +1,4 @@
 // M5STACK-Cに、GPS(UART接続)を繋いで値を取得する
-// Programed by Kazuyuki Eguchi
-// ver0.01 M5Stack に変更０
 // 画面サイズ 320*240
 
 
@@ -10,16 +8,6 @@
 // GPSのピン指定(GLOVE)
 //#define GPS_TX 33
 //#define GPS_RX 32
-
-// GPSのピン指定(HAT)
-// #define GPS_TX 16
-// #define GPS_RX 17
-
-// 各種定数
-// titele:タイトル
-// lat:緯度
-// lon:経度
-// alt:高度
 
 
 // 各種定数
@@ -49,8 +37,9 @@ struct set_BT_name {
 
 set_BT_name BT_name_buf ;
 
-struct set_position_data { //30
-  char title[11]; //11
+// EEPROMの構造体宣言
+struct set_position_data { //34
+  char title[14]; //15
   short int year_data ; //2
   byte month_data ; //1
   byte day_data ; //1
@@ -111,7 +100,7 @@ void sw_draw() {
 // EEPROMへ書き込み
 void eeprom_write(byte data_no) {
   EEPROM.put<set_BT_name> (0, BT_name_buf);
-  EEPROM.put <set_position_data> (22, set_position_buf[data_no]);
+  EEPROM.put <set_position_data> (data_no * 40 + 30, set_position_buf[data_no]);
   EEPROM.commit();
 }
 
@@ -135,7 +124,6 @@ void eeprom_reset() {
   }
   //EEPROM reset
   for (byte count = 0; count <= 5; count++) {
-    BT_name_buf.BT_name[0] = '\0';
     set_position_buf[count].title[0] = '\0'; //11
     set_position_buf[count].year_data = 0; //2
     set_position_buf[count].month_data = 0; //1
@@ -150,26 +138,46 @@ void eeprom_reset() {
   }
 }
 
+// セッティング用draw
+void setting_draw() {
+
+  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
+  M5.Lcd.setTextSize(2);          // 文字のサイズ
+  M5.Lcd.setCursor(5, 0);
+  M5.Lcd.print(F("Set by BT"));
+  M5.Lcd.setCursor(5, 20);
+  M5.Lcd.print(F("Title :"));
+  M5.Lcd.print(set_position_buf[page_count - 1].title);
+  M5.Lcd.setCursor(5, 40);
+  M5.Lcd.print(F("Date :"));
+  M5.Lcd.printf("%4d/%2d/%2d\n", set_position_buf[page_count - 1].year_data,  set_position_buf[page_count - 1].month_data, set_position_buf[page_count - 1].day_data);
+  M5.Lcd.setCursor(5, 60);
+  M5.Lcd.print(F("Time :"));
+  M5.Lcd.printf("%2d:%2d:%2d\n", set_position_buf[page_count - 1].hour_data, set_position_buf[page_count - 1].minute_data, set_position_buf[page_count - 1].second_data);
+  M5.Lcd.setCursor(5, 80);
+  M5.Lcd.print(F("lat :"));
+  M5.Lcd.print(set_position_buf[page_count - 1].lat_data, 12);
+  M5.Lcd.setCursor(5, 100);
+  M5.Lcd.print(F("long :"));
+  M5.Lcd.print(set_position_buf[page_count - 1].long_data, 12);
+  M5.Lcd.setCursor(5, 120);
+  M5.Lcd.print(F("alt :"));
+  M5.Lcd.print(set_position_buf[page_count - 1].alt_data);
+}
+
 // セッティング用サブルーチン
 void setting() {
 
   // 変数定義
   String read_serial = "";
 
-  //setCpuFrequencyMhz(80); //周波数変更
+  setCpuFrequencyMhz(80); //周波数変更
   delay(100);
   SerialBT.begin("esp_gps"); // bluetoothスタート
   SerialBT.setTimeout(100); // タイムアウトまでの時間を設定
 
-  M5.Lcd.fillScreen(BLACK);  // 画面をクリア
-  M5.Lcd.setTextSize(2);          // 文字のサイズ
-  M5.Lcd.setCursor(5, 10);
-  M5.Lcd.print(F("Set by BT"));
+  setting_draw();
 
-  //ボタン判定のリセット
-  delay(1000);
-  M5.update();
-  M5.BtnC.wasReleased();
   // ここから読取用のルーチン
   while (1) {
     power_supply_draw(); // 電源の状態だけ更新する
@@ -177,8 +185,16 @@ void setting() {
     if (SerialBT.available() > 0) { //シリアルに文字が送られてきてるか
       read_serial = SerialBT.readStringUntil(';');
     }
+    // スペースと改行を消す
+    int search_number = 0; // 文字検索用検索
+    while (search_number != -1) { // 消したい文字が見つからなくなるまで繰り返す
+      search_number = read_serial.lastIndexOf(" "); // スペースを検索する
+      if (search_number = -1)search_number = read_serial.lastIndexOf("\n"); // 改行を検索する
+      if (search_number != -1)read_serial.remove(search_number);
+    }
+
     // 受信したときの処置
-    if (read_serial.endsWith(";") == true) { // 末尾が";"か確認する
+    if (read_serial != "") { // 文字が入っていたら実行する
       int comma_position = read_serial.indexOf(",");
       if (read_serial.equalsIgnoreCase("help") == true) {
         // ここにヘルプの内容を書き込む
@@ -192,7 +208,7 @@ void setting() {
         SerialBT.println(F("save:"));
       } else if (comma_position != -1) { // ","があるか判定する
         String item_str = read_serial.substring(0, comma_position); // 項目読み取り
-        String value_str = read_serial.substring(comma_position, read_serial.length() - 1); // 数値読み取り
+        String value_str = read_serial.substring(comma_position + 1, read_serial.length()); // 数値読み取り
 
         // 読み取った結果を表示する
         if (item_str == "title") {
@@ -225,11 +241,11 @@ void setting() {
         }
         if (item_str == "lat") {
           set_position_buf[page_count - 1].lat_data = value_str.toFloat();
-          SerialBT.print(F("lat,")); SerialBT.print(set_position_buf[page_count - 1].lat_data); SerialBT.println(F(";"));
+          SerialBT.print(F("lat,")); SerialBT.print(set_position_buf[page_count - 1].lat_data, 12); SerialBT.println(F(";"));
         }
         if (item_str == "long") {
           set_position_buf[page_count - 1].long_data = value_str.toFloat();
-          SerialBT.print(F("long,")); SerialBT.print(set_position_buf[page_count - 1].long_data); SerialBT.println(F(";"));
+          SerialBT.print(F("long,")); SerialBT.print(set_position_buf[page_count - 1].long_data, 12); SerialBT.println(F(";"));
         }
         if (item_str == "alt") {
           set_position_buf[page_count - 1].alt_data = value_str.toFloat();
@@ -237,17 +253,18 @@ void setting() {
         }
 
       }
+      setting_draw();
     }
     read_serial = ""; //　クリア
     power_supply_draw();
     M5.update(); // ボタンの状態を更新
-    if (M5.BtnC.wasReleased()) { //ボタンを押してたらループから抜ける
+    if (M5.BtnC.wasPressed()) { //ボタンを押してたらループから抜ける
       break;
     }
   }
   SerialBT.disconnect(); // bluetooth ストップ
   delay(100);
-  //setCpuFrequencyMhz(80); //周波数変更
+  setCpuFrequencyMhz(20); //周波数変更
   delay(100);
   M5.Lcd.fillScreen(BLACK); // 画面をクリア
   //menu_lcd_draw(); // メニューのLCD表示
@@ -260,51 +277,32 @@ void setting() {
 void displayInfo()
 {
 
-  //画面初期化
-  //M5.Lcd.fillScreen(TFT_BLACK);
-  //M5.Lcd.setCursor(0, 0);
-
   //GPS シリアル定義
   //static const uint32_t GPSBaud = 9600;
   //TinyGPSPlus gps;
   //HardwareSerial GPSUART(2);
 
-  //電流・電圧読み取り
-  //read_voltage = M5.Axp.GetBatVoltage();
-  //read_current = M5.Axp.GetBatCurrent();
-  read_voltage = 0;
-  read_current = 0;
 
   //電圧・電流を表示する
   power_supply_draw();
   sw_draw();
   M5.Lcd.setTextSize(2); // 文字のサイズ
-  //M5.Lcd.fillRect(0, 0, 160, 8, TFT_BLACK);
-  //M5.Lcd.setCursor(0, 0);
-  //M5.Lcd.printf("V:%6.3f  I:%6.1f\n", read_voltage, read_current);
 
-  //M5.Lcd.fillRect(0, 8, 160, 8, TFT_BLACK);
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.print(F("Date :"));
   M5.Lcd.printf("%4d/%2d/%2d\n", read_year, read_month, read_day);
-  //M5.Lcd.fillRect(0, 16, 160, 8, TFT_BLACK);
   M5.Lcd.setCursor(0, 20);
   M5.Lcd.print(F("Time :"));
   M5.Lcd.printf("%2d:%2d:%2d\n", read_hour, read_minute, read_second);
-  //M5.Lcd.setTextSize(1); // 文字のサイズ
-  //M5.Lcd.fillRect(0, 24, 160, 8, TFT_BLACK);
   M5.Lcd.setCursor(0, 40);
   M5.Lcd.print(F("Lat:"));
   M5.Lcd.println(read_lat, 7);
-  //M5.Lcd.fillRect(0, 32, 160, 8, TFT_BLACK);
   M5.Lcd.setCursor(0, 60);
   M5.Lcd.print(F("Long:"));
   M5.Lcd.println(read_long, 7);
-  //M5.Lcd.fillRect(0, 40, 160, 8, TFT_BLACK);
   M5.Lcd.setCursor(0, 80);
   M5.Lcd.print(F("Alt:"));
   M5.Lcd.println(read_alt, 2);
-  //M5.Lcd.fillRect(0, 48, 160, 8, TFT_BLACK);
   M5.Lcd.setCursor(0, 100);
   M5.Lcd.print(F("Speed:"));
   M5.Lcd.println(read_speed, 4);
@@ -340,29 +338,29 @@ void pozition_comp()
   }
   power_supply_draw();
   sw_draw();
-  //M5.Lcd.fillScreen(TFT_BLACK);
-  //M5.Lcd.setCursor(0, 0);
+
   M5.Lcd.setTextSize(2); // 文字のサイズ
   M5.Lcd.setCursor(0, 0);
+  M5.Lcd.print(F("Page:"));
+  M5.Lcd.print(page_count);
+  M5.Lcd.setCursor(0, 20);
   M5.Lcd.print(F("Titel:"));
   M5.Lcd.print(set_position_buf[page_count - 1].title);
-  M5.Lcd.setCursor(0, 20);
+  M5.Lcd.setCursor(0, 40);
   M5.Lcd.print(F("Set Date :"));
   M5.Lcd.printf("%4d/%2d/%2d\n", set_position_buf[page_count - 1].year_data,  set_position_buf[page_count - 1].month_data, set_position_buf[page_count - 1].day_data);
-  M5.Lcd.setCursor(0, 40);
+  M5.Lcd.setCursor(0, 60);
   M5.Lcd.print(F("Set Time :"));
   M5.Lcd.printf("%2d:%2d:%2d\n", set_position_buf[page_count - 1].hour_data, set_position_buf[page_count - 1].minute_data, set_position_buf[page_count - 1].second_data);
-  M5.Lcd.setCursor(0, 60);
+  M5.Lcd.setCursor(0, 80);
   M5.Lcd.print(F("Dis:"));
   M5.Lcd.println(comparison_distance, 2);
-  M5.Lcd.setCursor(0, 80);
+  M5.Lcd.setCursor(0, 100);
   M5.Lcd.print(F("Dir:"));
   M5.Lcd.println(comparison_direction, 2);
-  //M5.Lcd.fillRect(0, 48, 160, 16, TFT_BLACK);
-  M5.Lcd.setCursor(0, 100);
+  M5.Lcd.setCursor(0, 120);
   M5.Lcd.print(F("Ang:"));
   M5.Lcd.println(comparison_angle, 2);
-  //M5.Lcd.print(F("Speed:"));  M5.Lcd.println(read_speed, 4);
 }
 
 //セットアップ
@@ -373,20 +371,18 @@ void setup()
   M5.Power.begin();
   ss.begin(GPSBaud);
   M5.Lcd.setBrightness(200);     // バックライトの明るさ(0-255)
-  //M5.Axp.ScreenBreath(8);         // バックライトの明るさ(7-15)
-  //M5.Lcd.setRotation(1);          // 表示の向き
   M5.Lcd.fillScreen(TFT_BLACK);   //LCD背景色
   M5.Lcd.setTextSize(1);          // 文字のサイズ
   M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK); // 文字の色
   M5.Lcd.setCursor(0, 0);
 
-  EEPROM.begin(30); //EEPROM開始(サイズ指定)
-   EEPROM.get <set_BT_name>(0, BT_name_buf );
+  EEPROM.begin(1024); //EEPROM開始(サイズ指定)
+  EEPROM.get <set_BT_name>(0, BT_name_buf );
   for (int count = 0; count <= 5; count++ ) {
-    EEPROM.get <set_position_data>(count * 30 + 22, set_position_buf[count]); // EEPROMを読み込む
+    EEPROM.get <set_position_data>(count * 40 + 30, set_position_buf[count]); // EEPROMを読み込む
   }
   //CPU周波数変更
-  //setCpuFrequencyMhz(20);
+  setCpuFrequencyMhz(20);
 
   //GPSのピン指定
   //GPSUART.begin(9600, SERIAL_8N1, GPS_TX, GPS_RX);
@@ -427,7 +423,8 @@ void loop()
         read_year = gps.date.year();
         read_month = gps.date.month();
         read_day = gps.date.day();
-        read_hour = gps.time.hour();
+        read_hour = 9 + gps.time.hour();
+        if (read_hour >= 24) read_hour -= 24;
         read_minute = gps.time.minute();
         read_second = gps.time.second();
         read_lat = gps.location.lat();
@@ -448,10 +445,17 @@ void loop()
     else //テストモードとの分岐(常時読取)
     {
       //GPS読み取り
+      //gps.encode(ss.read());
+
+      while (ss.available() > 0) {
+        gps.encode(ss.read());
+      }
+
       read_year = gps.date.year();
       read_month = gps.date.month();
       read_day = gps.date.day();
-      read_hour = gps.time.hour();
+      read_hour = 9 + gps.time.hour();
+      if (read_hour >= 24) read_hour -= 24;
       read_minute = gps.time.minute();
       read_second = gps.time.second();
       read_lat = gps.location.lat();
